@@ -15,5 +15,8 @@ public:
     
     size_t max_capacity() const;
     size_t hot_capacity() const;
+    
+    void add_tokens();
+    void evict_cold_tokens();
 };
 }

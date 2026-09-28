@@ -2,21 +2,24 @@
 #include "weaver/memory.h"
 #include <cuda_runtime.h>
 #include <stdexcept>
+#include <string>
 
 namespace weaver {
 
 void* UnifiedAllocator::allocate_device(size_t size) {
     void* ptr = nullptr;
-    if (cudaMalloc(&ptr, size) != cudaSuccess) {
-        throw std::runtime_error("CUDA malloc failed");
+    cudaError_t err = cudaMalloc(&ptr, size);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA malloc failed: ") + cudaGetErrorString(err));
     }
     return ptr;
 }
 
 void* UnifiedAllocator::allocate_pinned_host(size_t size) {
     void* ptr = nullptr;
-    if (cudaMallocHost(&ptr, size) != cudaSuccess) {
-        throw std::runtime_error("CUDA malloc host failed");
+    cudaError_t err = cudaMallocHost(&ptr, size);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA malloc host failed: ") + cudaGetErrorString(err));
     }
     return ptr;
 }
@@ -24,12 +27,19 @@ void* UnifiedAllocator::allocate_pinned_host(size_t size) {
 void UnifiedAllocator::free(void* ptr) {
     if (!ptr) return;
     cudaPointerAttributes attr;
-    if (cudaPointerGetAttributes(&attr, ptr) == cudaSuccess) {
-        if (attr.type == cudaMemoryTypeHost) {
-            cudaFreeHost(ptr);
-        } else {
-            cudaFree(ptr);
-        }
+    cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA pointer get attributes failed: ") + cudaGetErrorString(err));
+    }
+    
+    if (attr.type == cudaMemoryTypeHost) {
+        err = cudaFreeHost(ptr);
+    } else {
+        err = cudaFree(ptr);
+    }
+    
+    if (err != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA free failed: ") + cudaGetErrorString(err));
     }
 }
 }

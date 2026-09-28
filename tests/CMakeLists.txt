@@ -1,4 +1,6 @@
 find_package(GTest REQUIRED)
-add_executable(weaver_tests test_main.cpp)
-target_link_libraries(weaver_tests GTest::gtest_main)
+add_executable(weaver_tests test_main.cpp test_memory.cpp ../src/memory.cpp)
+find_package(CUDAToolkit REQUIRED)
+target_include_directories(weaver_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(weaver_tests GTest::gtest_main CUDA::cudart)
 add_test(NAME BasicTest COMMAND weaver_tests)

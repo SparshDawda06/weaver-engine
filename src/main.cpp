@@ -50,43 +50,62 @@ void print_report() {
         std::cout << kv_stats << "\n";
     }
     std::cout << "========================================================\n";
-    std::cout << "Tip: Run './weaver -i' for interactive chat mode!\n";
+    std::cout << "Tip: Run './weaver -i' for real-time streaming interactive chat!\n";
     std::cout << "========================================================\n";
 }
 
-void setup_chat_helper() {
-    std::ofstream out("/tmp/weaver_chat.py");
+void setup_stream_helper() {
+    std::ofstream out("/tmp/weaver_stream.py");
     out << "import sys, json, urllib.request, time\n";
     out << "prompt = sys.argv[1]\n";
     out << "url = 'http://127.0.0.1:8080/v1/chat/completions'\n";
-    out << "data = json.dumps({'messages': [{'role': 'user', 'content': prompt}]}).encode('utf-8')\n";
+    out << "data = json.dumps({'messages': [{'role': 'user', 'content': prompt}], 'stream': True}).encode('utf-8')\n";
     out << "req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})\n";
     out << "t0 = time.time()\n";
+    out << "first_token_time = None\n";
+    out << "tok_count = 0\n";
     out << "try:\n";
-    out << "    # Increased timeout to 300 seconds to prevent premature backend dropouts on long generations\n";
-    out << "    with urllib.request.urlopen(req, timeout=300) as r:\n";
-    out << "        res = json.loads(r.read().decode('utf-8'))\n";
-    out << "        el = time.time() - t0\n";
-    out << "        ct = res['usage']['completion_tokens']\n";
-    out << "        pt = res['usage']['prompt_tokens']\n";
-    out << "        tps = ct / el if el > 0 else 0\n";
-    out << "        content = res['choices'][0]['message']['content'].strip()\n";
-    out << "        print(content)\n";
-    out << "        print(f'--METRICS--|prompt: {pt} tok|comp: {ct} tok|time: {el:.2f}s|tps: {tps:.2f} tok/s')\n";
+    out << "    with urllib.request.urlopen(req, timeout=300) as response:\n";
+    out << "        for line in response:\n";
+    out << "            line_str = line.decode('utf-8').strip()\n";
+    out << "            if line_str.startswith('data: '):\n";
+    out << "                raw_json = line_str[6:].strip()\n";
+    out << "                if raw_json == '[DONE]':\n";
+    out << "                    break\n";
+    out << "                try:\n";
+    out << "                    chunk = json.loads(raw_json)\n";
+    out << "                    delta = chunk['choices'][0].get('delta', {})\n";
+    out << "                    delta_content = delta.get('content') or delta.get('reasoning_content')\n";
+    out << "                    if delta_content:\n";
+    out << "                        if first_token_time is None:\n";
+    out << "                            first_token_time = time.time()\n";
+    out << "                        tok_count += 1\n";
+    out << "                        sys.stdout.write(delta_content)\n";
+    out << "                        sys.stdout.flush()\n";
+    out << "                except Exception:\n";
+    out << "                    pass\n";
+    out << "    t_end = time.time()\n";
+    out << "    gen_time = (t_end - first_token_time) if first_token_time else (t_end - t0)\n";
+    out << "    pure_decode_tps = (tok_count / gen_time) if gen_time > 0 else 0\n";
+    out << "    total_time = t_end - t0\n";
+    out << "    sys.stdout.write(f'\\n__METRICS__|{tok_count}|{gen_time:.2f}|{pure_decode_tps:.2f}|{total_time:.2f}\\n')\n";
+    out << "    sys.stdout.flush()\n";
     out << "except Exception as e:\n";
-    out << "    print(f'Error communicating with backend: {e}')\n";
+    out << "    sys.stdout.write(f'\\nError communicating with engine: {e}\\n')\n";
+    out << "    sys.stdout.flush()\n";
     out.close();
 }
 
 void run_chat() {
     std::cout << "========================================================\n";
-    std::cout << "   WEAVER INTERACTIVE CHAT (128K Context | 125B MoE)    \n";
+    std::cout << "   WEAVER INTERACTIVE CHAT (Streaming | 128K | 125B)   \n";
     std::cout << "========================================================\n";
     std::cout << "Connected to: Qwen3.8-Flash-Next 125B (IQ3_XXS)\n";
+    std::cout << "Streaming: Enabled (Tokens print as generated in real time)\n";
     std::cout << "Type your message and press Enter. Type '/exit' to quit.\n";
     std::cout << "--------------------------------------------------------\n\n";
 
-    setup_chat_helper();
+    setup_stream_helper();
     std::string user_input;
 
     while (true) {
@@ -95,7 +114,6 @@ void run_chat() {
         if (user_input.empty()) continue;
         if (user_input == "/exit" || user_input == "/quit") break;
 
-        // Escape quotes
         std::string safe_input = user_input;
         size_t pos = 0;
         while ((pos = safe_input.find("\"", pos)) != std::string::npos) {
@@ -103,20 +121,60 @@ void run_chat() {
             pos += 2;
         }
 
-        std::string cmd = "python3 /tmp/weaver_chat.py \"" + safe_input + "\"";
-        std::string resp = exec(cmd.c_str());
+        std::cout << "\n\033[1;32mWeaver:\033[0m ";
+        std::cout.flush();
 
-        size_t metric_pos = resp.find("--METRICS--|");
-        std::string content = (metric_pos != std::string::npos) ? resp.substr(0, metric_pos) : resp;
+        std::string cmd = "python3 -u /tmp/weaver_stream.py \"" + safe_input + "\"";
         
-        std::cout << "\n\033[1;32mWeaver:\033[0m " << content << "\n";
-
-        if (metric_pos != std::string::npos) {
-            std::string metrics = resp.substr(metric_pos + 12);
-            std::cout << "\033[1;30m[" << metrics.substr(0, metrics.find('\n')) << "]\033[0m\n\n";
-        } else {
-            std::cout << "\n";
+        FILE* pipe = popen(cmd.c_str(), "r");
+        if (!pipe) {
+            std::cerr << "Failed to start streaming process!\n";
+            continue;
         }
+
+        char buffer[256];
+        std::string full_response = "";
+        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+            std::string chunk(buffer);
+            size_t m_pos = chunk.find("__METRICS__|");
+            if (m_pos != std::string::npos) {
+                // print whatever was before metrics
+                if (m_pos > 0) {
+                    std::cout << chunk.substr(0, m_pos);
+                    std::cout.flush();
+                }
+                // extract metric values
+                std::string metric_str = chunk.substr(m_pos + 12);
+                // read remainder of pipe to get the full line if split
+                while (metric_str.find('\n') == std::string::npos && fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+                    metric_str += buffer;
+                }
+                size_t nl = metric_str.find('\n');
+                if (nl != std::string::npos) metric_str = metric_str.substr(0, nl);
+                
+                // Parse tok_count|gen_time|pure_decode_tps|total_time
+                std::vector<std::string> parts;
+                size_t p_start = 0, p_end = metric_str.find('|');
+                while (p_end != std::string::npos) {
+                    parts.push_back(metric_str.substr(p_start, p_end - p_start));
+                    p_start = p_end + 1;
+                    p_end = metric_str.find('|', p_start);
+                }
+                parts.push_back(metric_str.substr(p_start));
+
+                if (parts.size() >= 4) {
+                    std::cout << "\n\033[1;30m[Pure Decode Speed: " << parts[2] 
+                              << " tok/s | Tokens: " << parts[0] 
+                              << " | Gen Time: " << parts[1] << "s"
+                              << " | Total Time: " << parts[3] << "s]\033[0m\n\n";
+                }
+                break;
+            } else {
+                std::cout << chunk;
+                std::cout.flush();
+            }
+        }
+        pclose(pipe);
     }
 }
 

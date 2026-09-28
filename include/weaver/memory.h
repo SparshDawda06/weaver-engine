@@ -7,6 +7,6 @@ class UnifiedAllocator {
 public:
     void* allocate_device(size_t size);
     void* allocate_pinned_host(size_t size);
-    void free(void* ptr);
+    void free(void* ptr) noexcept;
 };
 }

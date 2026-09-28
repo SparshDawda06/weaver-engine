@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 #include <string>
+#include <iostream>
 
 namespace weaver {
 
@@ -24,12 +25,13 @@ void* UnifiedAllocator::allocate_pinned_host(size_t size) {
     return ptr;
 }
 
-void UnifiedAllocator::free(void* ptr) {
+void UnifiedAllocator::free(void* ptr) noexcept {
     if (!ptr) return;
     cudaPointerAttributes attr;
     cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
     if (err != cudaSuccess) {
-        throw std::runtime_error(std::string("CUDA pointer get attributes failed: ") + cudaGetErrorString(err));
+        std::cerr << "CUDA pointer get attributes failed: " << cudaGetErrorString(err) << std::endl;
+        return;
     }
     
     if (attr.type == cudaMemoryTypeHost) {
@@ -39,7 +41,7 @@ void UnifiedAllocator::free(void* ptr) {
     }
     
     if (err != cudaSuccess) {
-        throw std::runtime_error(std::string("CUDA free failed: ") + cudaGetErrorString(err));
+        std::cerr << "CUDA free failed: " << cudaGetErrorString(err) << std::endl;
     }
 }
 }

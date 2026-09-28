@@ -39,7 +39,7 @@ void print_report() {
     std::cout << "--------------------------------------------------------\n\n";
 
     std::cout << "--- HARDWARE EXECUTION STATS (Live GPU Kernel Counters) ---\n";
-    std::string stats = exec("grep -E 'strata serve: prompt' /home/sparsh/strata-app/strata-iq3_xxs.log 2>/dev/null | tail -5");
+    std::string stats = exec("grep -E 'strata serve: prompt' /home/sparsh/strata-app/strata-iq3_xxs.log 2>/dev/null | tail -6");
     std::string kv_stats = exec("grep -E 'KV streaming:' /home/sparsh/strata-app/strata-iq3_xxs.log 2>/dev/null | tail -5");
     
     if (!stats.empty()) {
@@ -63,7 +63,8 @@ void setup_chat_helper() {
     out << "req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})\n";
     out << "t0 = time.time()\n";
     out << "try:\n";
-    out << "    with urllib.request.urlopen(req, timeout=120) as r:\n";
+    out << "    # Increased timeout to 300 seconds to prevent premature backend dropouts on long generations\n";
+    out << "    with urllib.request.urlopen(req, timeout=300) as r:\n";
     out << "        res = json.loads(r.read().decode('utf-8'))\n";
     out << "        el = time.time() - t0\n";
     out << "        ct = res['usage']['completion_tokens']\n";
@@ -71,7 +72,7 @@ void setup_chat_helper() {
     out << "        tps = ct / el if el > 0 else 0\n";
     out << "        content = res['choices'][0]['message']['content'].strip()\n";
     out << "        print(content)\n";
-    out << "        print(f'--METRICS--|{pt}|{ct}|{el:.2f}|{tps:.2f}')\n";
+    out << "        print(f'--METRICS--|prompt: {pt} tok|comp: {ct} tok|time: {el:.2f}s|tps: {tps:.2f} tok/s')\n";
     out << "except Exception as e:\n";
     out << "    print(f'Error communicating with backend: {e}')\n";
     out.close();
@@ -94,7 +95,7 @@ void run_chat() {
         if (user_input.empty()) continue;
         if (user_input == "/exit" || user_input == "/quit") break;
 
-        // Escape double quotes for shell
+        // Escape quotes
         std::string safe_input = user_input;
         size_t pos = 0;
         while ((pos = safe_input.find("\"", pos)) != std::string::npos) {
@@ -112,8 +113,7 @@ void run_chat() {
 
         if (metric_pos != std::string::npos) {
             std::string metrics = resp.substr(metric_pos + 12);
-            // format: pt|ct|el|tps
-            std::cout << "\033[1;30m[" << metrics.substr(0, metrics.find('\n')) << " tok/s]\033[0m\n\n";
+            std::cout << "\033[1;30m[" << metrics.substr(0, metrics.find('\n')) << "]\033[0m\n\n";
         } else {
             std::cout << "\n";
         }

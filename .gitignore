@@ -1,0 +1,9 @@
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+.DS_Store
+*.log
+/tmp/weaver_stream.py
